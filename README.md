@@ -3,7 +3,7 @@
 Modelamiento ARMA del Índice de Riesgo Geopolítico (GPR) con la metodología Box-Jenkins:
 identificación, estimación, validación y pronóstico a 10 meses.
 
-**Integrantes:** Lyna Camila Tique Nova
+Lyna Camila Tique Nova
 
 ## Datos
 
