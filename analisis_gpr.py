@@ -142,28 +142,52 @@ tabla_h.to_csv(ruta_salidas / "04_error_fuera_de_muestra.csv", encoding="utf-8-s
 # PASO 5. Pronóstico a 10 períodos con el modelo elegido
 # ---------------------------------------------------------------
 # El modelo final se estima con TODA la muestra (ya no dejamos meses por fuera)
-pron = resultados[modelo_final].get_forecast(steps=10)
+res_final = resultados[modelo_final]
+pron = res_final.get_forecast(steps=10)
 pred = pron.predicted_mean
-ic = pron.conf_int(alpha=0.05)  # intervalo de confianza del 95 %
+ic = pron.conf_int(alpha=0.05)  # IC normal: supone errores normales
+
+# IC por bootstrap de residuales: NO supone normalidad.
+# Se simulan 5000 trayectorias del AR(3) sacando shocks (con reemplazo)
+# de los residuales observados, y se toman los percentiles 2.5 % y 97.5 %.
+assert modelo_final == "AR(3)", "El bootstrap de abajo está escrito para un AR(3)"
+c = res_final.params["intercept"]
+phi = res_final.params[["ar.L1", "ar.L2", "ar.L3"]].values
+e = res_final.resid.iloc[3:].values      # residuales (sin los 3 primeros)
+rng = np.random.default_rng(123)         # semilla fija: resultados reproducibles
+B, H = 5000, 10
+shocks = rng.choice(e, size=(B, H))
+trayectorias = np.zeros((B, H))
+y1, y2, y3 = (np.full(B, y.iloc[-k]) for k in (1, 2, 3))  # y_T, y_T-1, y_T-2
+for h in range(H):
+    nuevo = c + phi[0] * y1 + phi[1] * y2 + phi[2] * y3 + shocks[:, h]
+    trayectorias[:, h] = nuevo
+    y1, y2, y3 = nuevo, y1, y2
+ic_boot = np.percentile(trayectorias, [2.5, 97.5], axis=0)
 
 tabla_p = pd.DataFrame({
     "Pronóstico": pred,
-    "IC 95% inferior": ic.iloc[:, 0],
-    "IC 95% superior": ic.iloc[:, 1],
+    "IC normal inf.": ic.iloc[:, 0],
+    "IC normal sup.": ic.iloc[:, 1],
+    "IC bootstrap inf.": ic_boot[0],
+    "IC bootstrap sup.": ic_boot[1],
 }).round(1)
 tabla_p.index = tabla_p.index.strftime("%Y-%m")
 tabla_p.index.name = "Mes"
-print(f"\n--- Pronóstico a 10 meses con {modelo_final} ---")
+print(f"\n--- Pronóstico a 10 meses con {modelo_final} (IC 95 %) ---")
 print(tabla_p.to_string())
 tabla_p.to_csv(ruta_salidas / "05_pronostico_10_meses.csv", encoding="utf-8-sig")
 
-# Gráfico: últimos 5 años + pronóstico con su banda
+# Gráfico: últimos 5 años + pronóstico con sus dos bandas
 reciente = y.iloc[-60:]
 plt.figure(figsize=(10, 4.5))
 plt.plot(reciente, label="GPR observado")
 plt.plot(pred, color="tab:red", label=f"Pronóstico {modelo_final}")
-plt.fill_between(pred.index, ic.iloc[:, 0], ic.iloc[:, 1],
-                 color="tab:red", alpha=0.2, label="IC 95 %")
+plt.fill_between(pred.index, ic_boot[0], ic_boot[1],
+                 color="tab:green", alpha=0.2, label="IC 95 % bootstrap")
+plt.plot(pred.index, ic.iloc[:, 0], color="tab:red", linestyle=":", linewidth=1,
+         label="IC 95 % normal")
+plt.plot(pred.index, ic.iloc[:, 1], color="tab:red", linestyle=":", linewidth=1)
 plt.axhline(y.mean(), color="gray", linestyle="--", linewidth=1, label="Media histórica")
 plt.title("Pronóstico del GPR a 10 meses")
 plt.xlabel("Fecha")
